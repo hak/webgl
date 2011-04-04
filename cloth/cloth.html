@@ -1,0 +1,380 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+  "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<title>WebGL cloth sim</title>
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
+
+<style type="text/css">html, body {
+  width: 100%;
+  height: 100%;
+  border: 0px;
+  padding: 0px;
+  margin: 0px;
+}
+
+canvas {
+border: none;
+        width: 100%;
+        height: 100%;
+}
+</style>
+
+<script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+<script type="text/javascript" src="webgl-utils.js"></script>
+<script type="text/javascript" src="cloth.js"></script>
+<script type="text/javascript" src="shadersupport.js"></script>
+
+<script id="shader-fs" type="x-shader/x-fragment">
+	#ifdef GL_ES
+	precision highp float;
+	#endif
+
+	varying vec2 vTextureCoord;
+	varying vec3 vNormal;
+	varying vec3 vPosition;
+
+	uniform sampler2D uSampler;
+    uniform vec3 vLight1;
+
+	void main(void) {
+		vec3 vNormal = normalize( vNormal );
+		vec4 tex =  texture2D(uSampler, vTextureCoord);
+		vec3 vAmbient = vec3( 0.2, 0.2, 0.2);
+		float f = max( dot( vNormal, vLight1 ), 0.0 );
+		vec3 v = vec3( f, f, f) + vAmbient;
+
+		vec3 halfVector = normalize(vLight1 + vPosition);
+		float NdotH = max(dot(-vNormal, halfVector), 0.0);	
+		float fPower = 50.0;
+		float specular = pow(NdotH, fPower);
+		vec3 vSpecular = vec3( specular * 0.3, specular * 0.3, specular * 0.3 );
+
+		gl_FragColor = vec4( tex.rgb * v + vSpecular, 1.0 );
+//		gl_FragColor = vec4( tex.rgb * v, 1.0 );
+//		gl_FragColor = vec4( vNormal, 1.0 );
+	}
+
+</script>
+
+<script id="shader-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec3 aVertexTangent1;
+    attribute vec3 aVertexTangent2;
+	attribute vec2 aTextureCoord;
+    
+	uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+	varying vec2 vTextureCoord;
+	varying vec3 vNormal;
+	varying vec3 vPosition;
+	
+	void main(void) {
+		vNormal = normalize( cross(aVertexTangent1, aVertexTangent2 ));
+		
+        vTextureCoord = aTextureCoord;
+		vPosition = vec3( uMVMatrix * vec4(aVertexPosition, 1.0) );
+		gl_Position = uPMatrix * uMVMatrix * vec4(aVertexPosition, 1.0);
+		
+    }
+</script>
+
+
+<script type="text/javascript">
+
+    var gl;
+    function initGL(canvas) {
+        try {
+            gl = WebGLUtils.setupWebGL( canvas );
+            gl.viewportWidth = canvas.width;
+            gl.viewportHeight = canvas.height;
+        } catch (e) {
+        }
+        if (!gl) {
+            alert("Could not initialise WebGL, sorry :-(");
+        }
+    }
+
+    var shaderProgram;
+
+    function initShaders() {
+		shaderProgram = initShader( gl, "shader-vs", "shader-fs" );
+        gl.useProgram(shaderProgram);
+
+        shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+        shaderProgram.vertexTangent1Attribute = gl.getAttribLocation(shaderProgram, "aVertexTangent1");
+        gl.enableVertexAttribArray(shaderProgram.vertexTangent1Attribute);
+
+        shaderProgram.vertexTangent2Attribute = gl.getAttribLocation(shaderProgram, "aVertexTangent2");
+        gl.enableVertexAttribArray(shaderProgram.vertexTangent2Attribute);
+
+		shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram, "aTextureCoord");
+		gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+
+        shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+        shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+		shaderProgram.samplerUniform = gl.getUniformLocation(shaderProgram, "uSampler");
+		shaderProgram.vLight1 = gl.getUniformLocation(shaderProgram, "vLight1");
+		
+    }
+
+    var mvMatrix = mat4.create();
+    var pMatrix = mat4.create();
+
+    function setMatrixUniforms() {
+        gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+        gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+        gl.uniform3f(shaderProgram.vLight1, 0.7, 0.0, 0.7 );
+    }
+
+	var cloth;
+    var squareVertexPositionBuffer;
+    var squareVertexUVBuffer;
+    var squareVertexElementBuffer;
+
+    function initBuffers() {
+		//Create and fill
+		//Element array buffer
+        squareVertexElementBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, squareVertexElementBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(cloth.elementArray), gl.STATIC_DRAW);
+        squareVertexElementBuffer.itemSize = 1;
+        squareVertexElementBuffer.numItems = cloth.elementArray.length;
+
+		//Vbo buffer
+        squareVertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
+		var array = cloth.update();
+//		var array = cloth.update();
+
+        gl.bufferData(gl.ARRAY_BUFFER, array, gl.STATIC_DRAW);
+        squareVertexPositionBuffer.itemSize = 3;
+        squareVertexPositionBuffer.numItems = array.length;
+
+		//UV vbo
+        squareVertexUVBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexUVBuffer);
+		var array = cloth.arrayUV;
+        gl.bufferData(gl.ARRAY_BUFFER, array, gl.STATIC_DRAW);
+        squareVertexUVBuffer.itemSize = 2;
+        squareVertexUVBuffer.numItems = array.length;
+
+    }
+
+	//
+	//Texture load
+	//
+	var flagTexture;
+	function handleLoadedTexture(texture) {
+		console.log("texture loaded");
+    	gl.bindTexture(gl.TEXTURE_2D, texture);
+		gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+	    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
+	    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);		
+	    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+	}
+	function initTexture() {
+    	flagTexture = gl.createTexture();
+    	flagTexture.image = new Image();
+ 		flagTexture.image.onload = function() {
+			handleLoadedTexture(flagTexture)
+ 		}
+		flagTexture.image.src = "naanstudio.png";
+	}
+	
+	var offsetX = 0.0;
+	var offsetY = 1.0;
+	var offsetZ = -7.0;
+
+    function drawScene() {
+        gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        mat4.perspective(45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0, pMatrix);
+
+        mat4.identity(mvMatrix);
+        mat4.translate(mvMatrix, [offsetX, offsetY, offsetZ]);
+
+		//Bind & Update vbo
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexPositionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER,
+			cloth.update(),
+			gl.STREAM_DRAW);
+        gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, squareVertexPositionBuffer.itemSize, gl.FLOAT, false, 36, 0);
+        gl.vertexAttribPointer(shaderProgram.vertexTangent1Attribute, squareVertexPositionBuffer.itemSize, gl.FLOAT, false, 36, 12);
+        gl.vertexAttribPointer(shaderProgram.vertexTangent2Attribute, squareVertexPositionBuffer.itemSize, gl.FLOAT, false, 36, 24);
+
+		//Bind UV
+        gl.bindBuffer(gl.ARRAY_BUFFER, squareVertexUVBuffer);
+        gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, squareVertexUVBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+		//Bind index buffer
+		gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, squareVertexElementBuffer);
+        setMatrixUniforms();
+
+		//bind texture
+		gl.activeTexture(gl.TEXTURE0);
+	    gl.bindTexture(gl.TEXTURE_2D, flagTexture);
+	    gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+        gl.disable(gl.CULL_FACE);
+        gl.drawElements(gl.TRIANGLES, squareVertexElementBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+//        gl.drawElements(gl.POINTS, squareVertexElementBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+		gl.enable(gl.CULL_FACE);
+    }
+
+    function tick() {
+        requestAnimFrame(tick);
+        drawScene();
+    }
+
+	//
+	//Mouse motion
+	//
+	var mouseDown = false;
+	var lastMouseX = null;
+	var lastMouseY = null;
+	var closestPoint = null;
+	
+    var invMatrix = mat4.create();
+	mat4.identity(invMatrix);
+    mat4.translate(invMatrix, [offsetX, offsetY, offsetZ]);
+	mat4.inverse(invMatrix);
+
+	function eyeVector(x, y, point, v )
+	{
+		var window_y = gl.viewportHeight - y -gl.viewportHeight/2;
+		var window_x = x - gl.viewportWidth / 2;
+		var norm_x = window_x / (gl.viewportWidth / 2);
+		var norm_y = window_y / (gl.viewportHeight / 2);
+
+		//0.1=near Z
+		var near = 0.1;
+		var nearHeight = near*Math.tan(45*Math.PI / 360.0);
+		var aspect = gl.viewportWidth / gl.viewportHeight;
+		
+		var vecRay = [norm_x * nearHeight * aspect,
+			norm_y * nearHeight,
+			-near, 0];
+		var vecPoint = [0, 0, 0, 1];
+		vecPoint = mat4.multiplyVec4( invMatrix, vecPoint );
+		vecRay = mat4.multiplyVec4( invMatrix, vecRay );
+		
+		point[ 0 ] = vecPoint[ 0 ];
+		point[ 1 ] = vecPoint[ 1 ];
+		point[ 2 ] = vecPoint[ 2 ];
+		v[ 0 ] = vecRay[ 0 ];
+		v[ 1 ] = vecRay[ 1 ];
+		v[ 2 ] = vecRay[ 2 ];
+	}
+
+	function handleMouseDown(event) {
+		mouseDown = true;
+		lastMouseX = event.clientX;
+		lastMouseY = event.clientY;
+		
+		var point = [ 0, 0, 0 ];
+		var vec = [ 0, 0, 0 ];
+		eyeVector( lastMouseX, lastMouseY, point, vec );
+
+		closestPoint = cloth.pick( point[ 0 ], point[ 1 ], point[ 2 ],
+			vec[ 0 ], vec[ 1 ], vec[ 2 ] );
+		
+		cloth.move( closestPoint, 
+				point[ 0 ] - (vec[ 0 ] * point[ 2 ]/vec[2]),
+				point[ 1 ] - (vec[ 1 ] * point[ 2 ]/vec[2]),
+				0 );
+			
+		console.log("picked:" + closestPoint );
+	}
+
+	function handleMouseUp(event) {
+		mouseDown = false;
+		cloth.release( closestPoint );
+	}
+
+	function handleMouseMove(event) {
+		if (!mouseDown) {
+			return;
+		}
+	    var newX = event.clientX;
+	    var newY = event.clientY;
+
+	    var deltaX = newX - lastMouseX;
+	    var deltaY = newY - lastMouseY;
+	
+		var point = [ 0, 0, 0 ];
+		var vec = [ 0, 0, 0 ];
+		eyeVector( lastMouseX, lastMouseY, point, vec );
+
+		cloth.move( closestPoint, 
+			point[ 0 ] - (vec[ 0 ] * point[ 2 ]/vec[2]),
+			point[ 1 ] - (vec[ 1 ] * point[ 2 ]/vec[2]),
+			0 );
+			
+		lastMouseX = newX
+		lastMouseY = newY;
+	}
+
+	function handleResize() {
+        var canvas = document.getElementById("canvas");
+        var w = window.innerWidth;
+        var h = window.innerHeight;
+        canvas.width = w;
+        canvas.height = h;
+        gl.viewportWidth = canvas.width;
+        gl.viewportHeight = canvas.height;
+        drawScene();
+	}
+	
+	function webGLStart() {
+
+        var canvas = document.getElementById("canvas");
+        var w = window.innerWidth;
+        var h = window.innerHeight;
+        canvas.width = w;
+        canvas.height = h;
+
+        initGL(canvas);
+
+		cloth = clothSim.init( 8, 8 );
+        initShaders();
+        initBuffers();
+		initTexture();
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+
+		canvas.onmousedown = handleMouseDown;
+		document.onmouseup = handleMouseUp;
+		document.onmousemove = handleMouseMove;
+		window.onresize = handleResize;
+		
+		tick();
+    }
+</script>
+<script type="text/javascript">
+
+  var _gaq = _gaq || [];
+  _gaq.push(['_setAccount', 'UA-22496910-1']);
+  _gaq.push(['_trackPageview']);
+
+  (function() {
+    var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+  })();
+
+</script>
+
+</head>
+<body onload="webGLStart();">
+	<canvas id="canvas" style="border: none;">Your browser does not support canvas</canvas>
+	<br/>
+</body>
+</html>
