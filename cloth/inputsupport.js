@@ -8,6 +8,7 @@
 //Mouse motion
 //
 var mouseEvents = {};
+var objectPool = [];
 
 //
 //Touch handler
@@ -15,24 +16,24 @@ var mouseEvents = {};
 function touchHandler(e) {
 	if ( e.type == "touchstart" )
 	{
-		if (e.touches.length == 1)
+		for( var i = 0; i < e.touches.length; ++i )
 		{
-			var touch = e.touches[0];
+			var touch = e.touches[i];
 			handleMouseDown( touch );
 		}
 		e.preventDefault();
 	} else if (e.type == "touchmove")
 	{
 		e.preventDefault();
-		if ( e.touches.length == 1 )
+		for( var i = 0; i < e.touches.length; ++i )
 		{
-			var touch = e.touches[0];
+			var touch = e.touches[i];
 			handleMouseMove( touch );
 		}
 	} else if ( e.type == "touchend" )
 	{
 		e.preventDefault();
-		if ( e.touches.length == 1 )
+		for( var i = 0; i < e.changedTouches.length; ++i )
 		{
 			var touch = e.changedTouches[0];
 			handleMouseUp( touch );
@@ -47,9 +48,16 @@ function handleMouseDown(event) {
 	}
 
 	if( mouseEvents[ event.identifier ] == null )
-		mouseEvents[ event.identifier ] = new Object();
-	
-	mouseEvents[ event.identifier ].active = true;
+	{
+		if( objectPool.length == 0 )
+			mouseEvents[ event.identifier ] = new Object();
+		else
+		{
+			mouseEvents[ event.identifier ] = objectPool[ objectPool.length - 1 ];
+			objectPool.pop();
+		}
+	}
+
 	mouseEvents[ event.identifier ].lastMouseX = event.clientX;
 	mouseEvents[ event.identifier ].lastMouseY = event.clientY;
 	
@@ -73,7 +81,8 @@ function handleMouseUp(event) {
 		event.identifier = 0;
 	}
 
-	mouseEvents[ event.identifier ].active = false;
+	objectPool.push( mouseEvents[ event.identifier ] );
+	mouseEvents[ event.identifier ] = null;
 	cloth.release( event.identifier );
 }
 
@@ -83,8 +92,7 @@ function handleMouseMove(event) {
 		event.identifier = 0;
 	}
 
-	if( mouseEvents[ event.identifier ] == null
-		|| mouseEvents[ event.identifier ].active == false )
+	if( mouseEvents[ event.identifier ] == null )
 	{
 		return;
 	}
