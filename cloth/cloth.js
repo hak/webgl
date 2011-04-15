@@ -289,13 +289,13 @@ var init = function(width, height)
 	};
 	
 	
-	var captured = null;
-	var closestIndex = -1;
-	var pick = function( a, b, c, p, q, r )
+	var captured = {};
+	var pick = function( id, a, b, c, p, q, r )
 	{
-		if( captured != null )
+		var closestIndex = -1;
+		if( captured[ id ] != null )
 		{
-			release( closestIndex );
+			release( id );
 		}
 		
 		var n = Math.sqrt( p * p + q * q + r * r );
@@ -331,14 +331,17 @@ var init = function(width, height)
 			index += 9;			
 		}
 
-		captured = object[ closestIndex ].connections;
+		captured[ id ] = new Object();
+		captured[ id ].obj = object[ closestIndex ].connections;
+		captured[ id ].index = closestIndex;
 		object[ closestIndex ].connections = new Uint16Array();
 
 		return closestIndex;
 	}	
 
-	var move = function( i, x, y, z )
+	var move = function( id, x, y, z )
 	{
+		i = captured[ id ].index;
 		arrayPosition[ i * 9 + 0 ] = x;
 		arrayPosition[ i * 9 + 1 ] = y;
 		arrayPosition[ i * 9 + 2 ] = z;
@@ -350,10 +353,10 @@ var init = function(width, height)
 		arrayParameters[ i * 6 + 5 ] = 0.0;
 	}	
 	
-	var release = function( i )
+	var release = function( id )
 	{
-		object[ i ].connections = captured;
-		captured = null;
+		object[ captured[ id ].index ].connections = captured[ id ].obj;
+		captured[ id ] = null;
 	}
 
 	object.update = update;
